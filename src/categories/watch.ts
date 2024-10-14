@@ -1,12 +1,12 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-require-imports */
 
-import db from '../database';
-import user from '../user';
+const db = require('../database');
+const user = require('../user');
 
 interface WatchStates {
     ignoring: number;
@@ -21,62 +21,75 @@ interface UserSettings {
 
 interface CategoriesType {
     watchStates: WatchStates;
-    isIgnored(cids: number[], uid: number): Promise<boolean[]>;
-    getWatchState(cids: number[], uid: number): Promise<number[]>;
-    getIgnorers(cid: number, start: number, stop: number): Promise<number[]>;
-    filterIgnoringUids(cid: number, uids: number[]): Promise<number[]>;
-    getUidsWatchStates(cid: number, uids: number[]): Promise<number[]>;
+    isIgnored: (cids: number[], uid: number) => Promise<boolean[]>;
+    getWatchState: (cids: number[], uid: number) => Promise<number[]>;
+    getIgnorers: (cid: number, start: number, stop: number) => Promise<number[]>;
+    filterIgnoringUids: (cid: number, uids: number[]) => Promise<number[]>;
+    getUidsWatchStates: (cid: number, uids: number[]) => Promise<number[]>;
 }
 
-const Categories: CategoriesType = {
-	watchStates: {
+module.exports = function (Categories: CategoriesType) {
+	Categories.watchStates = {
 		ignoring: 1,
 		notwatching: 2,
 		tracking: 3,
 		watching: 4,
-	},
+	};
 
-	async isIgnored(cids: number[], uid: number): Promise<boolean[]> {
+	Categories.isIgnored = async function (cids: number[], uid: number): Promise<boolean[]> {
 		if (!(parseInt(uid.toString(), 10) > 0)) {
 			return cids.map(() => false);
 		}
-		const states = await this.getWatchState(cids, uid);
-		return states.map(state => state === this.watchStates.ignoring);
-	},
+		const states = await Categories.getWatchState(cids, uid);
+		return states.map(state => state === Categories.watchStates.ignoring);
+	};
 
-	async getWatchState(cids: number[], uid: number): Promise<number[]> {
+	Categories.getWatchState = async function (cids: number[], uid: number): Promise<number[]> {
 		if (!(parseInt(uid.toString(), 10) > 0)) {
-			return cids.map(() => this.watchStates.notwatching);
+			return cids.map(() => Categories.watchStates.notwatching);
 		}
 		if (!Array.isArray(cids) || !cids.length) {
 			return [];
 		}
 		const keys = cids.map(cid => `cid:${cid}:uid:watch:state`);
-		const [userSettings, states] = await Promise.all([
-            user.getSettings(uid) as Promise<UserSettings>,
-            db.sortedSetsScore(keys, uid) as Promise<number[]>,
+		const [userSettings, states]: [UserSettings, (number | null)[]] = await Promise.all([
+			user.getSettings(uid),
+			db.sortedSetsScore(keys, uid),
 		]);
-		return states.map(state => state || this.watchStates[userSettings.categoryWatchState]);
-	},
+		return states.map(state => state || Categories.watchStates[userSettings.categoryWatchState]);
+	};
 
-	async getIgnorers(cid: number, start: number, stop: number): Promise<number[]> {
+	Categories.getIgnorers = async function (cid: number, start: number, stop: number): Promise<number[]> {
 		const count = (stop === -1) ? -1 : (stop - start + 1);
-		return await db.getSortedSetRevRangeByScore(`cid:${cid}:uid:watch:state`, start, count, this.watchStates.ignoring, this.watchStates.ignoring);
-	},
+		try {
+			return await db.getSortedSetRevRangeByScore(`cid:${cid}:uid:watch:state`, start, count, Categories.watchStates.ignoring, Categories.watchStates.ignoring);
+		} catch (err) {
+			console.error('Error in getIgnorers:', err);
+			return [];
+		}
+	};
 
-	async filterIgnoringUids(cid: number, uids: number[]): Promise<number[]> {
-		const states = await this.getUidsWatchStates(cid, uids);
-		const readingUids = uids.filter((uid, index) => uid && states[index] !== this.watchStates.ignoring);
-		return readingUids;
-	},
+	Categories.filterIgnoringUids = async function (cid: number, uids: number[]): Promise<number[]> {
+		try {
+			const states = await Categories.getUidsWatchStates(cid, uids);
+			const readingUids = uids.filter((uid, index) => uid && states[index] !== Categories.watchStates.ignoring);
+			return readingUids;
+		} catch (err) {
+			console.error('Error in filterIgnoringUids:', err);
+			return [];
+		}
+	};
 
-	async getUidsWatchStates(cid: number, uids: number[]): Promise<number[]> {
-		const [userSettings, states] = await Promise.all([
-            user.getMultipleUserSettings(uids) as Promise<UserSettings[]>,
-            db.sortedSetScores(`cid:${cid}:uid:watch:state`, uids) as Promise<number[]>,
-		]);
-		return states.map((state, index) => state || this.watchStates[userSettings[index].categoryWatchState]);
-	},
+	Categories.getUidsWatchStates = async function (cid: number, uids: number[]): Promise<number[]> {
+		try {
+			const [userSettings, states]: [UserSettings[], (number | null)[]] = await Promise.all([
+				user.getMultipleUserSettings(uids),
+				db.sortedSetScores(`cid:${cid}:uid:watch:state`, uids),
+			]);
+			return states.map((state, index) => state || Categories.watchStates[userSettings[index].categoryWatchState]);
+		} catch (err) {
+			console.error('Error in getUidsWatchStates:', err);
+			return [];
+		}
+	};
 };
-
-export default Categories;
