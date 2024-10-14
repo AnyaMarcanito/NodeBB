@@ -3,6 +3,7 @@
     "license": "GPL-3.0",
     "description": "NodeBB Forum",
     "version": "3.8.4",
+    "type": "module",
     "homepage": "https://www.nodebb.org",
     "repository": {
         "type": "git",
